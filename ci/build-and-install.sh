@@ -34,6 +34,16 @@ sudo cp daemon/resources/goxlr-utility.svg /usr/share/icons/hicolor/scalable/app
 sudo cp daemon/resources/goxlr-utility-large.png /usr/share/pixmaps/goxlr-utility.png
 sudo chmod 644 /usr/share/icons/hicolor/48x48/apps/goxlr-utility.png /usr/share/icons/hicolor/scalable/apps/goxlr-utility.svg /usr/share/pixmaps/goxlr-utility.png
 
+# Create a desktop file for the utility
+sudo cp daemon/resources/goxlr-utility.desktop /usr/share/applications/
+sudo chmod 644 /usr/share/applications/goxlr-utility.desktop
+
+# Refresh the application cache
+sudo update-desktop-database
+
+# Copy the desktop file to autostart
+sudo cp /usr/share/applications/goxlr-utility.desktop ~/.config/autostart/
+
 sudo cp 50-goxlr.rules /etc/udev/rules.d/
 sudo chmod 644 /etc/udev/rules.d/50-goxlr.rules
 sudo udevadm control --reload-rules
