@@ -37,6 +37,37 @@ impl TTS {
                 },
                 Some(message) = rx.recv() => {
                     debug!("Received TTS Message: {}", message);
+
+                     // Call "go-automate ha ib on in_a_call" if the message contains "Mic unmuted"
+                    if message.to_lowercase().contains("mic unmuted") {
+                      let output = std::process::Command::new("go-automate")
+                      .arg("ha")
+                      .arg("ib")
+                      .arg("on")
+                      .arg("in_a_call")
+                      .output()
+                      .expect("failed to execute process");
+
+                      println!("status: {}", output.status);
+                      println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+                      println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                    }
+
+                    // Call "go-automate ha ib off in_a_call" if the message contains "Mic muted"
+                    if message.to_lowercase().contains("mic muted") {
+                      let output = std::process::Command::new("go-automate")
+                      .arg("ha")
+                      .arg("ib")
+                      .arg("off")
+                      .arg("in_a_call")
+                      .output()
+                      .expect("failed to execute process");
+
+                      println!("status: {}", output.status);
+                      println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+                      println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                    }
+
                     self.speak_tts(message).await;
                 },
             }
