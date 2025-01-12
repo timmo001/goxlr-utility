@@ -43,6 +43,8 @@ sudo update-desktop-database
 
 # Copy the desktop file to autostart
 sudo cp /usr/share/applications/goxlr-utility.desktop ~/.config/autostart/
+sudo chown "$USER":"$USER" ~/.config/autostart/goxlr-utility.desktop
+sudo chmod 644 ~/.config/autostart/goxlr-utility.desktop
 
 sudo cp 50-goxlr.rules /etc/udev/rules.d/
 sudo chmod 644 /etc/udev/rules.d/50-goxlr.rules
