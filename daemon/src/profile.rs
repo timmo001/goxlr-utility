@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::default::Default;
 use std::fs::{remove_file, File};
@@ -2417,6 +2416,11 @@ impl ProfileAdapter {
             return Ok(());
         }
 
+        // Before we start, we need to grab the current router. While this is only used in
+        // Headphones -> Other, create_router() itself checks the monitored output and returns the
+        // updated headphone routing accordingly, so we *MUST* do this before we set the monitor.
+        let router = self.create_router();
+
         // Store the change in monitoring state, we do that here so that when we call
         // set_routing, it knows everything it needs to!
         self.profile
@@ -2428,13 +2432,12 @@ impl ProfileAdapter {
         if device != OutputDevice::Headphones && output == OutputChannels::Headphones {
             // We're moving from Headphones to a different output for monitoring.
             // We need to store the existing routing for the headphones into the monitor tree.
-            let mut new_map: EnumMap<InputChannels, u16> = Default::default();
-            let router = self.create_router();
+            let mut original_headphones: EnumMap<InputChannels, u16> = Default::default();
 
             for input in InputDevice::iter() {
                 if router[input][OutputDevice::Headphones] {
                     let channel = standard_input_to_profile(input);
-                    new_map[channel] = 8192;
+                    original_headphones[channel] = 8192;
                 }
             }
 
@@ -2443,7 +2446,7 @@ impl ProfileAdapter {
                 .settings_mut()
                 .submixes_mut()
                 .monitor_tree_mut()
-                .set_routing(new_map);
+                .set_routing(original_headphones);
 
             // Get the currently assigned headphone mix, and store that..
             let mix = self
@@ -3349,43 +3352,5 @@ pub fn usb_to_standard_button(source: Buttons) -> Button {
 }
 
 pub fn version_newer_or_equal_to(version: &VersionNumber, comparison: VersionNumber) -> bool {
-    match version.0.cmp(&comparison.0) {
-        Ordering::Greater => return true,
-        Ordering::Less => return false,
-        Ordering::Equal => {}
-    }
-
-    match version.1.cmp(&comparison.1) {
-        Ordering::Greater => return true,
-        Ordering::Less => return false,
-        Ordering::Equal => {}
-    }
-
-    if let Some(patch) = version.2 {
-        if let Some(comparison) = comparison.2 {
-            match patch.cmp(&comparison) {
-                Ordering::Greater => return true,
-                Ordering::Less => return false,
-                Ordering::Equal => {}
-            }
-        } else {
-            return true;
-        }
-    } else if comparison.2.is_some() {
-        return false;
-    }
-
-    if let Some(build) = version.3 {
-        if let Some(comparison) = comparison.3 {
-            if build >= comparison {
-                return true;
-            }
-        } else {
-            return true;
-        }
-    } else if comparison.3.is_some() {
-        return false;
-    }
-
-    true
+    version >= &comparison
 }

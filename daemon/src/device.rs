@@ -34,6 +34,9 @@ use crate::audio::{AudioFile, AudioHandler};
 use crate::events::EventTriggers;
 use crate::events::EventTriggers::TTSMessage;
 use crate::files::find_file_in_path;
+use crate::firmware::firmware_update::{
+    FirmwareMessages, HardwareProgressResponse, ProgressResponse, ValidateUploadChunkResponse,
+};
 use crate::mic_profile::{MicProfileAdapter, DEFAULT_MIC_PROFILE_NAME};
 use crate::profile::{
     usb_to_standard_button, version_newer_or_equal_to, ProfileAdapter, DEFAULT_PROFILE_NAME,
@@ -932,6 +935,17 @@ impl<'a> Device<'a> {
                 if !lock_faders {
                     // User has asked us not to move the volume,
                     self.goxlr.set_volume(channel, 0)?;
+
+                    // With the Mix2 firmware, when setting the volume to 0 the fader no longer goes
+                    // in steps, so MixB doesn't follow along to 0 anymore, so we'll do this manually
+                    if self.device_supports_mix2() && self.profile.is_submix_enabled() {
+                        if let Some(sub) = self.profile.get_submix_from_channel(channel) {
+                            if self.profile.is_channel_linked(sub) {
+                                self.goxlr.set_sub_volume(sub, 0)?;
+                                self.profile.set_submix_volume(sub, 0);
+                            }
+                        }
+                    }
                 }
             }
             self.goxlr.set_channel_state(channel, Muted)?;
@@ -996,6 +1010,18 @@ impl<'a> Device<'a> {
             if !self.is_device_mini() && !lock_faders {
                 self.goxlr.set_volume(channel, previous_volume)?;
                 self.profile.set_channel_volume(channel, previous_volume)?;
+
+                // Same as setting, but we also need to restore it on the ratio
+                if self.device_supports_mix2() && self.profile.is_submix_enabled() {
+                    if let Some(sub) = self.profile.get_submix_from_channel(channel) {
+                        if self.profile.is_channel_linked(sub) {
+                            let ratio = self.profile.get_submix_ratio(sub);
+                            let linked_volume = (previous_volume as f64 * ratio) as u8;
+                            self.goxlr.set_sub_volume(sub, linked_volume)?;
+                            self.profile.set_submix_volume(sub, linked_volume);
+                        }
+                    }
+                }
             } else {
                 if self.needs_submix_correction(channel) {
                     // This is a special case, when calling unmute on submix firmware, the LineOut
@@ -1721,6 +1747,14 @@ impl<'a> Device<'a> {
 
         let db = ((f64::log(level.into(), 10.) * 20.) - 72.2).clamp(-72.2, 0.);
         Ok(db)
+    }
+
+    pub fn get_hardware_type(&mut self) -> DeviceType {
+        self.hardware.device_type
+    }
+
+    pub fn get_firmware_version(&mut self) -> VersionNumber {
+        self.hardware.versions.firmware.clone()
     }
 
     pub async fn perform_command(&mut self, command: GoXLRCommand) -> Result<()> {
@@ -2917,6 +2951,87 @@ impl<'a> Device<'a> {
             }
         }
         Ok(())
+    }
+
+    pub async fn handle_firmware_message(&mut self, message: FirmwareMessages) {
+        match message {
+            FirmwareMessages::EnterDFUMode(sender) => {
+                // We're entering DFU mode, stop polling for updates
+                self.goxlr.set_is_polling(false);
+                let _ = sender.send(self.goxlr.begin_firmware_upload());
+            }
+            FirmwareMessages::BeginEraseNVR(sender) => {
+                let _ = sender.send(self.goxlr.begin_erase_nvr());
+            }
+            FirmwareMessages::PollEraseNVR(sender) => {
+                let response = self.goxlr.poll_erase_nvr();
+                match response {
+                    Ok(progress) => {
+                        let _ = sender.send(Ok(ProgressResponse { progress }));
+                    }
+                    Err(e) => {
+                        let _ = sender.send(Err(anyhow!("Failed to Poll NVR Erase: {}", e)));
+                    }
+                }
+            }
+            FirmwareMessages::UploadFirmwareChunk(req, sender) => {
+                let bytes = req.total_byes_sent;
+                let slice = req.chunk.as_slice();
+                let _ = sender.send(self.goxlr.send_firmware_packet(bytes, slice));
+            }
+            FirmwareMessages::ValidateUploadChunk(req, sender) => {
+                let done = req.processed_bytes;
+                let hash = req.hash_in;
+                let left = req.remaining_bytes;
+
+                match self.goxlr.validate_firmware_packet(done, hash, left) {
+                    Ok((hash, count)) => {
+                        let _ = sender.send(Ok(ValidateUploadChunkResponse { hash, count }));
+                    }
+                    Err(e) => {
+                        let _ = sender.send(Err(anyhow!("Unable to Parse Response: {}", e)));
+                    }
+                }
+            }
+            FirmwareMessages::BeginHardwareVerify(sender) => {
+                let _ = sender.send(self.goxlr.verify_firmware_status());
+            }
+            FirmwareMessages::PollHardwareVerify(sender) => {
+                match self.goxlr.poll_verify_firmware_status() {
+                    Ok((complete, read_total, read_done)) => {
+                        let _ = sender.send(Ok(HardwareProgressResponse {
+                            completed: complete,
+                            total_bytes: read_total,
+                            processed_bytes: read_done,
+                        }));
+                    }
+                    Err(e) => {
+                        let _ = sender.send(Err(anyhow!("Failed to Poll: {}", e)));
+                    }
+                }
+            }
+            FirmwareMessages::BeginHardwareWrite(sender) => {
+                let _ = sender.send(self.goxlr.finalise_firmware_upload());
+            }
+            FirmwareMessages::PollHardwareWrite(sender) => {
+                match self.goxlr.poll_finalise_firmware_upload() {
+                    Ok((complete, read_total, read_done)) => {
+                        let _ = sender.send(Ok(HardwareProgressResponse {
+                            completed: complete,
+                            total_bytes: read_total,
+                            processed_bytes: read_done,
+                        }));
+                    }
+                    Err(e) => {
+                        let _ = sender.send(Err(anyhow!("Failed to Poll: {}", e)));
+                    }
+                }
+            }
+            FirmwareMessages::RebootGoXLR(sender) => {
+                let _ = sender.send(self.goxlr.reboot_after_firmware_upload());
+                self.goxlr.set_is_polling(true);
+            }
+        }
     }
 
     fn update_button_states(&mut self) -> Result<()> {

@@ -1,6 +1,6 @@
 [package]
 name = "goxlr-daemon"
-version = "1.1.4"
+version = "1.2.2"
 edition = "2021"
 authors = ["Nathan Adams <dinnerbone@dinnerbone.com>", "Craig McLure <craig@mclure.net>", "Lars Mühlbauer <lm41@dismail.de>"]
 description = "Allows control of a TC-Helicon GoXLR or GoXLR Mini, by maintaining an interaction with it over USB in the background."
@@ -65,10 +65,13 @@ actix-web = { version = "4.8.0", default-features = false, features = ["macros",
 actix-cors = "0.7.0"
 mime_guess = "2.0.5"
 include_dir = "0.7.4"
+actix-multipart = "0.7.2"
 
 # Used for Firmware Update Checks
-reqwest = "0.12.5"
+reqwest = { version = "0.12.5", features = ["stream"] }
 xmltree = "0.10.3"
+futures = "0.3.30"
+futures-util = "0.3.30"
 
 [target.'cfg(target_family = "unix")'.dependencies]
 nix = { version = "0.29.0", features = ["user"] }
@@ -108,14 +111,14 @@ image = "0.25.2"
 shell-words = "1.1.0"
 
 # Used for Tray Handling
-cocoa-foundation = "0.1.2"
-cocoa = "0.25.0"
-objc-foundation = "0.1.1"
-objc = "0.2.7"
+objc2-app-kit = "0.3.0"
+objc2-foundation = "0.3.0"
+dispatch2 = "0.2.0"
+objc2 = "0.6.0"
 
 # Used for Aggregate Device Management
 coreaudio-sys = "0.2.15"
-core-foundation = "0.9.4"
+core-foundation = "0.10.0"
 io-kit-sys = "0.4.1"
 
 [build-dependencies]
@@ -175,10 +178,10 @@ assets = [
     { source = "../deployment/deb/_goxlr-daemon", dest = "/usr/share/zsh/vendor-completions/_goxlr-daemon", mode = "0644" },
 ]
 
-# Tiny scriptlet, should reload udev, unless we are running an immutable OS like Fedora Silverblue.
+# Tiny scriptlet, should reload udev if possible.
 post_install_script = """
-[[ -f /run/ostree-booted ]] || udevadm control --reload-rules
-[[ -f /run/ostree-booted ]] || udevadm trigger
+udevadm control --reload-rules || echo -e "\\033[0;31mReloading udev failed. You might need to reboot after installation.\\033[0m" 1>&2
+udevadm trigger || echo -e "\\033[0;31mReloading udev failed. You might need to reboot after installation.\\033[0m" 1>&2
 """
 
 #release = "1"

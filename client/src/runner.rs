@@ -1,9 +1,10 @@
 use crate::cli::{
     AnimationCommands, ButtonGroupLightingCommands, ButtonLightingCommands, CompressorCommands,
     CoughButtonBehaviours, Echo, EffectsCommands, EqualiserCommands, EqualiserMiniCommands,
-    FaderCommands, FaderLightingCommands, FadersAllLightingCommands, Gender, HardTune,
-    LightingCommands, Megaphone, MicrophoneCommands, NoiseGateCommands, Pitch, ProfileAction,
-    ProfileType, Reverb, Robot, SamplerCommands, Scribbles, SubCommands, SubmixCommands,
+    FaderCommands, FaderLightingCommands, FadersAllLightingCommands, FirmwareCommands, Gender,
+    HardTune, LightingCommands, Megaphone, MicrophoneCommands, NoiseGateCommands, Pitch,
+    ProfileAction, ProfileType, Reverb, Robot, SamplerCommands, Scribbles, SubCommands,
+    SubmixCommands,
 };
 use crate::cli::{Cli, DeviceSettings};
 use crate::microphone::apply_microphone_controls;
@@ -479,7 +480,7 @@ pub async fn run_cli() -> Result<()> {
                                 .await
                                 .context("Unable to load Profile Colours")?;
                         }
-                        ProfileAction::Save {} => {
+                        ProfileAction::Save => {
                             client
                                 .command(&serial, GoXLRCommand::SaveProfile())
                                 .await
@@ -523,7 +524,7 @@ pub async fn run_cli() -> Result<()> {
                         ProfileAction::LoadColours { .. } => {
                             return Err(anyhow!("Not supported for Microphone"));
                         }
-                        ProfileAction::Save {} => {
+                        ProfileAction::Save => {
                             client
                                 .command(&serial, GoXLRCommand::SaveMicProfile())
                                 .await
@@ -1019,6 +1020,29 @@ pub async fn run_cli() -> Result<()> {
                     DeviceSettings::LockFaders { enabled } => {
                         client
                             .command(&serial, GoXLRCommand::SetLockFaders(*enabled))
+                            .await?;
+                    }
+                },
+                SubCommands::Firmware { command } => match command {
+                    FirmwareCommands::FirmwareUpdate { path } => {
+                        client
+                            .daemon_command(DaemonRequest::RunFirmwareUpdate(
+                                serial.to_string(),
+                                path.clone(),
+                                false,
+                            ))
+                            .await?;
+                    }
+                    FirmwareCommands::ContinueFirmwareUpdate => {
+                        client
+                            .daemon_command(DaemonRequest::ContinueFirmwareUpdate(
+                                serial.to_string(),
+                            ))
+                            .await?;
+                    }
+                    FirmwareCommands::ClearFirmwareUpdate => {
+                        client
+                            .daemon_command(DaemonRequest::ClearFirmwareState(serial.to_string()))
                             .await?;
                     }
                 },

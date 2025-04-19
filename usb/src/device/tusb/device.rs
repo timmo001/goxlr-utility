@@ -240,7 +240,7 @@ impl AttachGoXLR for TUSBAudioGoXLR {
         true
     }
 
-    fn stop_polling(&mut self) {
+    fn set_is_polling(&mut self, _polling: bool) {
         // The TUSB implementation is event driven, so there's no polling to stop.
     }
 }
@@ -373,6 +373,6 @@ pub fn find_devices() -> Vec<GoXLRDevice> {
     get_devices()
 }
 
-pub fn get_interface_version() -> (DriverInterface, VersionNumber) {
+pub fn get_interface_version() -> (DriverInterface, Option<VersionNumber>) {
     (DriverInterface::TUSB, get_version())
 }

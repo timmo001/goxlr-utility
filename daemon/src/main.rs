@@ -3,12 +3,14 @@
 extern crate core;
 
 use std::fs::create_dir_all;
+use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use actix_web::dev::ServerHandle;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use enum_map::EnumMap;
 use file_rotate::compression::Compression;
 use file_rotate::suffix::AppendCount;
 use file_rotate::{ContentLimit, FileRotate};
@@ -23,7 +25,7 @@ use sys_locale::get_locale;
 use tokio::join;
 use tokio::sync::{broadcast, mpsc};
 
-use goxlr_ipc::{HttpSettings, LogLevel};
+use goxlr_ipc::{FirmwareSource, HttpSettings, LogLevel};
 
 use crate::cli::{Cli, LevelFilter};
 use crate::events::{spawn_event_handler, DaemonState, EventTriggers};
@@ -42,6 +44,7 @@ mod cli;
 mod device;
 mod events;
 mod files;
+mod firmware;
 mod mic_profile;
 mod platform;
 mod primary_worker;
@@ -53,7 +56,16 @@ mod tray;
 mod tts;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[allow(dead_code)]
 const ICON: &[u8] = include_bytes!("../resources/goxlr-utility-large.png");
+#[cfg(target_os = "macos")]
+const ICON_MAC: &[u8] = include_bytes!("../resources/icon.icns");
+
+const FIRMWARE_PATHS: EnumMap<FirmwareSource, &str> = EnumMap::from_array([
+    "https://mediadl.musictribe.com/media/PLM/sftp/incoming/hybris/import/GOXLR/",
+    "https://mediadl.musictribe.com/media/PLM/sftp/incoming/hybris/import/FirmwareAssets/GOXLR/LiveTestArea/",
+]);
 
 /**
 This is ugly, and I know it's ugly. I need to rework how the Primary Worker is constructed
@@ -103,7 +115,8 @@ async fn main() -> Result<()> {
         let message = format!("Error Starting the GoXLR Utility:\r\n\r\n{}", e);
         platform::display_error(message);
 
-        bail!("{}", e);
+        // Kill the process with an error to ensure the entire runtime is stopped
+        process::exit(1);
     }
 
     Ok(())
@@ -140,6 +153,8 @@ async fn run_utility() -> Result<()> {
     config.add_filter_ignore_str("actix_server::server");
     config.add_filter_ignore_str("actix_server::builder");
     config.add_filter_ignore_str("zbus");
+    config.add_filter_ignore_str("hyper_util");
+    config.add_filter_ignore_str("reqwest");
 
     // I'm generally not interested in the Symphonia header announcements which go to INFO,
     // it's only useful in a development setting!
@@ -344,6 +359,10 @@ async fn run_utility() -> Result<()> {
         ));
         http_server = httpd_rx.await?;
         if let Err(e) = http_server {
+            // Force a shutdown, if we bail! here, the entire async runtime will keep on going
+            // despite the server being pretty much dead, and threads may still be active causing
+            // us to go zombie.
+            shutdown.trigger();
             bail!("Unable to Start HTTP Server: {}", e);
         }
     } else {
